@@ -1,0 +1,1948 @@
+<html>
+
+
+<head>
+
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+<Title> Control Terminal</Title>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+
+<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/keras-js/2.2.5/keras.min.js"></script> -->
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/0.7.3/p5.min.js"></script>
+
+</head>
+
+
+
+<body>
+
+<div id="root">
+
+</div>
+
+
+</body>
+
+
+
+<script>
+
+
+class Memories {
+
+    constructor() {
+    
+        this.memories = [];
+        this.directory = ".";
+        this.filename = "memories.json";
+    
+    }
+    
+    addMemory(memory) {
+    
+        this.memories.push(memory);
+    
+    }
+    
+    getMemories() {
+    
+        return this.memories;
+    
+    }
+    
+    clearMemories() {
+    
+        this.memories = [];
+    
+    }
+
+    async saveMemories() {
+    
+let request=await fetch("localhost:3000/saveMemories", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(this.memories)
+        });
+        let response=await request.json();
+
+    return response;
+    }
+
+    async loadMemories() {
+    
+        let request=await fetch("http://localhost:3000/loadMemories", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(this.memories)
+        });
+        let response=await request.json();
+       // this.memories=response;
+    return response;
+    }
+
+    async getDirectories() {
+    
+        let request=await fetch("localhost:3000/getDirectories", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(this.memories)
+        });
+        let response=await request.json();
+        //this.directory=response;
+    return response;
+    }
+
+    async getFiles() {
+    
+        let request=await fetch("localhost:3000/getFiles", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(this.memories)
+        });
+        let response=await request.json();
+        //this.filename=response;
+
+    return response;
+    }
+
+    async setDirectory(directory) {
+    
+        let request=await fetch("localhost:3000/setDirectory", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(directory)
+        });
+        let response=await request.json();
+        //this.directory=response;
+    return response;
+    }
+
+    async writeFile(filename) {
+    
+        let request=await fetch("localhost:3000/writeFile", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(filename)
+        });
+        let response=await request.json();
+        //this.filename=response;
+        return response;
+    }
+
+    async readFile(filename) {
+    
+        let request=await fetch("localhost:3000/readFile", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(filename)
+        });
+        let response=await request.json();
+        //this.filename=response;
+        return response;
+    }
+
+    
+}
+
+
+
+//convert input to LSTM input
+async function convertSentencesToLSTMInput(sentences, delimiter = " ") {
+  const tokens = [];
+  for (let i = 0; i < sentences.length; i++) {
+    const words = sentences[i].toString().split(delimiter);
+    for (let j = 0; j < words.length; j++) {
+      tokens.push(words[j].toLowerCase());
+    }
+  }
+  return tokens;
+}
+
+
+
+//convert the graph into a format suitable for shortestPath.
+
+function convertGraphToShortestPathFormat(graph) {
+  const nodes = Object.keys(graph);
+  const edges = [];
+  for (const node in graph) {
+    for (const neighbor in graph[node]) {
+      edges.push([node, neighbor, graph[node][neighbor]]);
+    }
+  }
+  return { nodes, edges };
+}
+
+
+function convertGraphToShortestPathFormat(graph) {
+  const nodes = Object.keys(graph);
+  const edges = [];
+  for (const node in graph) {
+    for (const neighbor in graph[node]) {
+      edges.push([node, neighbor, graph[node][neighbor]]);
+    }
+  }
+  return { nodes, edges };
+}
+
+
+function createGraph(sentences, delimiter, n = 2) {
+  const graph = {};
+
+  const tokens = convertSentencesToLSTMInput(sentences, delimiter);
+
+  for (let i = 0; i < tokens.length - n + 1; i++) {
+    const sequence = tokens.slice(i, i + n).join(" ");
+    const vertex = sequence.split(delimiter).map((word) => word.charCodeAt(0).toString(2).padStart(8, "0")).join("");
+    graph[vertex] = { lstmInput: sequence };
+    for (let j = 0; j < n; j++) {
+      const nextSequence = tokens.slice(i + j + 1, i + n + 1).join(" ");
+      if (nextSequence.length < n) continue;
+      const nextVertex = nextSequence.split(delimiter).map((word) => word.charCodeAt(0).toString(2).padStart(8, "0")).join("");
+      const distance = j + 1;
+      graph[vertex][nextVertex] = distance;
+    }
+  }
+
+  return graph;
+}
+
+
+function addEdges(graph, system, mapping, n = 2) {
+  const base = system.length;
+  for (const vertex in graph) {
+    for (let i = 0; i < base; i++) {
+      const newNum = parseInt(vertex, base) * base + i;
+      const newVertex = newNum.toString(base);
+      const mappedVertex = mapping[vertex] ? mapping[vertex][i] : null;
+      if (mappedVertex) {
+        graph[vertex][newVertex] = 0;
+        const nextSequence = mappedVertex.slice(n - 1);
+        if (nextSequence.length < n) continue;
+        const nextVertex = nextSequence.split(" ").map((word) => word.charCodeAt(0).toString(2).padStart(8, "0")).join("");
+        const distance = n;
+        graph[newVertex] = { lstmInput: nextSequence };
+        graph[newVertex][nextVertex] = distance;
+      }
+    }
+  }
+
+  console.log(graph);
+}
+
+
+
+class PatternMaster {
+constructor(requirements,arrayLSTM, geneticAlgorithmValue, mem, delimiter, n = 2) {
+this.requirements = requirements;
+//this.initialPatterns = this.generateInitialPatterns(sentences, delimiter, n);
+this.optimizedPatterns = [];
+this.machineLearning = new LSTM(arrayLSTM[0], arrayLSTM[1], arrayLSTM[2], arrayLSTM[3], arrayLSTM[4]);
+//neuralnet is machine learning - lstm
+this.geneticAlgorithm = geneticAlgorithmValue;
+this.memmories=mem;
+
+this.scaling=[];
+}
+
+
+
+getMachineLearning() {
+return this.machineLearning;
+}
+
+getGeneticAlgorithm() {
+return this.geneticAlgorithm;
+}
+
+randomizeWorld(world) {
+        for (var i = 0; i < world.length; i++) {
+            for (var j = 0; j < world[i].length; j++) {
+                var seedHandler = this.getSeedHandler(i, j);
+                var seed = seedHandler.getSeed();
+                var random = new Math.seedrandom(seed);
+                var randomValue = random();
+                if (randomValue > 0.5) {
+                    world[i][j] = 1;
+                } else {
+                    world[i][j] = 0;
+                }
+            }
+        }
+    }
+
+    drawWorld(world) {
+        for (var i = 0; i < world.length; i++) {
+            for (var j = 0; j < world[i].length; j++) {
+                if (world[i][j] == 1) {
+                    drawCell(j * 10, i * 10, "black");
+                } else {
+                    drawCell(j * 10, i * 10, "white");
+                }
+            }
+        }
+    }
+
+    drawWorldWithBorders(world) {
+        for (var i = 0; i < world.length; i++) {
+            for (var j = 0; j < world[i].length; j++) {
+                if (world[i][j] == 1) {
+                    drawCellWithBorder(j * 10, i * 10, "black");
+                } else {
+                    drawCellWithBorder(j * 10, i * 10, "white");
+                }
+            }
+        }
+    }
+
+    drawNgram() {
+        var world = [];
+        for (var i = 0; i < this.size; i++) {
+            world[i] = [];
+            for (var j = 0; j < this.size; j++) {
+                world[i][j] = "grey";
+            }
+        }
+        this.randomizeWorld(world);
+        this.drawWorldWithBorders(world);
+    }
+
+    splitNgram() {
+        var ngrams = [];
+        var ngramSize = this.size / 2;
+        var ngramWeight = this.weight / 4;
+        var ngramEpoch = this.epoch + 1;
+        for (var i = 0; i < 2; i++) {
+            for (var j = 0; j < 2; j++) {
+                var seedhandlers = [];
+                var time = this.time;
+                var size = ngramSize;
+                var weight = ngramWeight;
+                var epoch = ngramEpoch;
+                var ngram = new Ngram(seedhandlers, time, size, weight, epoch);
+                ngrams.push(ngram);
+            }
+        }
+        return ngrams;
+    }
+
+    getNgram(x, y) {
+        var ngram = null;
+        var ngrams = this.splitNgram();
+        for (var i = 0; i < ngrams.length; i++) {
+            var ngramX = ngrams[i].getTime() * ngrams[i].getSize();
+            var ngramY = ngrams[i].getTime() * ngrams[i].getSize();
+            if (x >= ngramX && x < ngramX + ngrams[i].getSize() && y >= ngramY && y < ngramY + ngrams[i].getSize()) {
+                ngram = ngrams[i];
+                break;
+            }
+        }
+        return ngram;
+    }
+
+    getNgramBySeed(seed) {
+        var ngram = null;
+        var ngrams = this.splitNgram();
+        for (var i = 0; i < ngrams.length; i++) {
+            var seedHandler = ngrams[i].getSeedHandler(0, 0);
+            if (seedHandler.getSeed() == seed) {
+                ngram = ngrams[i];
+                break;
+            }
+        }
+        return ngram;
+    }
+
+    getNgramBySeedHandler(seedHandler) {
+        var ngram = null;
+        var ngrams = this.splitNgram();
+        for (var i = 0; i < ngrams.length; i++) {
+            var seedHandler2 = ngrams[i].getSeedHandler(0, 0);
+            if (seedHandler2.getSeed() == seedHandler.getSeed()) {
+                ngram = ngrams[i];
+                break;
+            }
+        }
+        return ngram;
+    }
+
+    getNgramBySeedHandlerAndTime(seedHandler, time) {
+        var ngram = null;
+        var ngrams = this.splitNgram();
+        for (var i = 0; i < ngrams.length; i++) {
+            var seedHandler2 = ngrams[i].getSeedHandler(0, 0);
+            if (seedHandler2.getSeed() == seedHandler.getSeed() && ngrams[i].getTime() == time) {
+                ngram = ngrams[i];
+                break;
+            }
+        }
+        return ngram;
+    }
+
+    getNgramBySeedAndTime(seed, time) {
+        var ngram = null;
+        var ngrams = this.splitNgram();
+        for (var i = 0; i < ngrams.length; i++) {
+            var seedHandler = ngrams[i].getSeedHandler(0, 0);
+            if (seedHandler.getSeed() == seed && ngrams[i].getTime() == time) {
+                ngram = ngrams[i];
+                break;
+            }
+        }
+        return ngram;
+    }
+
+    getSeedHandler(x, y) {
+        var seedHandler = null;
+        var ngrams = this.splitNgram();
+        for (var i = 0; i < ngrams.length; i++) {
+            var ngramX = ngrams[i].getTime() * ngrams[i].getSize();
+            var ngramY = ngrams[i].getTime() * ngrams[i].getSize();
+            if (x >= ngramX && x < ngramX + ngrams[i].getSize() && y >= ngramY && y < ngramY + ngrams[i].getSize()) {
+                seedHandler = ngrams[i].getSeedHandler(x - ngramX, y - ngramY);
+                break;
+            }
+        }
+        return seedHandler;
+    }
+
+
+
+
+
+
+async generateInitialPatterns(sentences, delimiter, n = 2) {
+const graph = {};
+
+const tokens = convertSentencesToLSTMInput(sentences, delimiter);
+
+for (let i = 0; i < tokens.length - n + 1; i++) {
+const sequence = tokens.slice(i, i + n).join(" ");
+const vertex = sequence.split(delimiter).map((word) => word.charCodeAt(0).toString(2).padStart(8, "0")).join("");
+graph[vertex] = { lstmInput: sequence };
+for (let j = 0; j < n; j++) {
+  const nextSequence = tokens.slice(i + j + 1, i + n + 1).join(" ");
+  if (nextSequence.length < n) continue;
+  const nextVertex = nextSequence.split(delimiter).map((word) => word.charCodeAt(0).toString(2).padStart(8, "0")).join("");
+  const distance = j + 1;
+  graph[vertex][nextVertex] = distance;
+}
+}
+
+return graph;
+}
+
+harmonicFunction(array) {
+//harmonic function
+const harmonicFunction = (array) => {
+const sum = array.reduce((a, b) => a + b, 0);
+const harmonic = array.length / sum;
+return harmonic;
+
+
+}
+}
+
+optimizePattern(pattern) {
+// оптимизация выбранной пользователем версии
+//mojno delim add
+// генерация новых версий паттернов на основе выбранной версии и настроек оптимизации
+for (let i = 0; i < 10; i++) {
+//optimization algorithm harmonic function
+
+this.optimizedPatterns.push(this.harmonicFunction(this.optimizedPattern));
+
+}
+
+}
+
+getFinalPattern() {
+// итерации оптимизации и генерации новых паттернов
+for (let i = 0; i < 5; i++) {
+const patternToOptimize = this.initialPatterns[Math.floor(Math.random() * this.initialPatterns.length)];
+this.optimizePattern(patternToOptimize);
+}
+
+
+// выбор наилучшей оптимизированной версии паттерна
+let tempinalPattern = this.optimizedPatterns.reduce((bestPattern, currentPattern) => {
+//get all columns and values
+
+ let columns = Object.keys(currentPattern);
+ console.log(columns);
+let values = Object.values(currentPattern);
+console.log(values);
+for (let i = 0; i < columns.length; i++) {
+    let column = columns[i];
+    let value = values[i];
+    if (value > bestPattern[column]) {
+      bestPattern[column] = value;
+    }
+
+    return bestPattern;
+
+
+
+}
+}, {});
+}
+
+
+trainLSTM() {
+//train (input, target) {
+  //convert to tensor2d
+let input = tf.tensor2d(this.machineLearning.inputLayer);
+let target = tf.tensor2d(this.machineLearning.outputLayer);
+
+//train
+this.machineLearning.model.fit(input, target, {
+    epochs: 100,
+    callbacks: {
+      onEpochEnd: (epoch, logs) => {
+        console.log(`Epoch ${epoch}: loss = ${logs.loss}`);
+      }
+    }
+
+    });
+
+    //train with time
+
+    
+  
+    //  this.machineLearning.train(this.optimizedPatterns, this.initialPatterns);
+
+
+    //or with time
+
+
+
+
+    console.log(this.machineLearning);
+
+
+}
+
+
+}
+
+// пример использования
+const requirements = {
+complexity: 'high',
+scalability: 'medium',
+modularity: 'high',
+performance: 'medium',
+maintainability: 'high'
+};
+
+
+
+class Layer {
+  constructor(currentStream, nextStream, typeOfLayer) {
+    this.currentStream = currentStream;
+    this.nextStream = nextStream;
+    this.typeOfLayer = typeOfLayer;
+    this.weights = [];
+    this.bias = [];
+    this.cellState = [];
+    this.hiddenState = [];
+    this.inputGate = [];
+    this.forgetGate = [];
+    this.outputGate = [];
+    this.inputLayer = [];
+    this.outputLayer = [];
+    this.prevHiddenState = [];
+    this.prevCellState = [];
+    this.nextHiddenState = [];
+    this.nextCellState = [];
+this.hiddenSize=0;
+    if (typeOfLayer === "input") {
+      this.inputSize = currentStream.length;
+    } else {
+      this.inputSize = nextStream.length;
+    }
+   // this.inputSize = currentStream.length;
+
+    if (typeOfLayer === "input") {
+      this.hiddenSize = currentStream.length;
+    } else {
+      this.hiddenSize = nextStream.length;
+    }
+
+   // this.hiddenSize = nextStream.length;
+
+    this.initializeWeights();
+    this.initializeBias();
+  }
+
+  initializeWeights() {
+    // Randomly initialize the weights of the LSTM layer
+    for (let i = 0; i < 4; i++) {
+      this.weights.push([]);
+      for (let j = 0; j < this.inputSize; j++) {
+        this.weights[i].push(Math.random());
+      }
+      for (let j = 0; j < this.hiddenSize; j++) {
+        this.weights[i].push(Math.random());
+      }
+    }
+  }
+
+  initializeBias() {
+    // Initialize the bias for each gate and layer
+    for (let i = 0; i < 4; i++) {
+      this.bias.push(0);
+    }
+    for (let i = 0; i < this.hiddenSize; i++) {
+      this.cellState.push(0);
+      this.hiddenState.push(0);
+      this.inputGate.push(0);
+      this.forgetGate.push(0);
+      this.outputGate.push(0);
+      this.inputLayer.push(0);
+      this.outputLayer.push(0);
+      this.prevHiddenState.push(0);
+      this.prevCellState.push(0);
+      this.nextHiddenState.push(0);
+      this.nextCellState.push(0);
+    }
+  }
+
+  forwardPass() {
+    // Compute the forward pass of the LSTM layer
+    for (let i = 0; i < this.hiddenSize; i++) {
+      this.prevHiddenState[i] = this.hiddenState[i];
+      this.prevCellState[i] = this.cellState[i];
+      this.inputLayer[i] = 0;
+      this.outputLayer[i] = 0;
+      for (let j = 0; j < this.inputSize; j++) {
+        // Compute the input gate
+        this.inputGate[i] += this.weights[0][j] * this.currentStream[j] + this.weights[0][this.inputSize + i] * this.prevHiddenState[i];
+        // Compute the forget gate
+        this.forgetGate[i] += this.weights[1][j] * this.currentStream[j] + this.weights[1][this.inputSize + i] * this.prevHiddenState[i];
+        // Compute the output gate
+        this.outputGate[i] += this.weights[2][j] * this.currentStream[j] + this.weights[2][this.inputSize + i] * this.prevHiddenState[i];
+        // Compute the input to the layer
+        this.inputLayer[i] += this.weights[3][j] * this.currentStream[j] + this.weights[3][this.inputSize + i] * this.prevHiddenState[i];
+      }
+      this.inputGate[i] += this.bias[0];
+
+        this.forgetGate[i] += this.bias[1];
+
+        this.outputGate[i] += this.bias[2];
+
+        this.inputLayer[i] += this.bias[3];
+
+        // Compute the cell state
+        this.cellState[i] = this.forgetGate[i] * this.prevCellState[i] + this.inputGate[i] * this.inputLayer[i];
+        // Compute the hidden state
+        this.hiddenState[i] = this.outputGate[i] * this.cellState[i];
+        // Compute the output of the layer
+        this.outputLayer[i] = this.hiddenState[i];
+    }
+    }
+
+    backwardPass() {
+
+    // Compute the backward pass of the LSTM layer
+    for (let i = 0; i < this.hiddenSize; i++) {
+      for (let j = 0; j < this.inputSize; j++) {
+        // Compute the gradient of the input gate
+        this.weights[0][j] += this.currentStream[j] * this.nextHiddenState[i] * this.nextCellState[i] * (1 - this.inputGate[i]) * this.inputGate[i];
+        // Compute the gradient of the forget gate
+        this.weights[1][j] += this.currentStream[j] * this.nextHiddenState[i] * this.nextCellState[i] * (1 - this.forgetGate[i]) * this.forgetGate[i];
+        // Compute the gradient of the output gate
+        this.weights[2][j] += this.currentStream[j] * this.nextHiddenState[i] * this.nextCellState[i] * (1 - this.outputGate[i]) * this.outputGate[i];
+        // Compute the gradient of the input to the layer
+        this.weights[3][j] += this.currentStream[j] * this.nextHiddenState[i] * this.nextCellState[i] * (1 - this.inputLayer[i]) * this.inputLayer[i];
+      }
+      // Compute the gradient of the bias
+      this.bias[0] += this.nextHiddenState[i] * this.nextCellState[i] * (1 - this.inputGate[i]) * this.inputGate[i];
+      this.bias[1] += this.nextHiddenState[i] * this.nextCellState[i] * (1 - this.forgetGate[i]) * this.forgetGate[i];
+      this.bias[2] += this.nextHiddenState[i] * this.nextCellState[i] * (1 - this.outputGate[i]) * this.outputGate[i];
+      this.bias[3] += this.nextHiddenState[i] * this.nextCellState[i] * (1 - this.inputLayer[i]) * this.inputLayer[i];
+    }
+
+    }
+
+    updateWeights() {
+
+    // Update the weights of the LSTM layer
+
+
+    for (let i = 0; i < this.hiddenSize; i++) {
+      for (let j = 0; j < this.inputSize; j++) {
+        // Update the weights of the input gate
+        this.weights[0][j] += this.learningRate * this.weights[0][j];
+        // Update the weights of the forget gate
+        this.weights[1][j] += this.learningRate * this.weights[1][j];
+        // Update the weights of the output gate
+        this.weights[2][j] += this.learningRate * this.weights[2][j];
+        // Update the weights of the input to the layer
+        this.weights[3][j] += this.learningRate * this.weights[3][j];
+      }
+      // Update the bias
+      this.bias[0] += this.learningRate * this.bias[0];
+      this.bias[1] += this.learningRate * this.bias[1];
+      this.bias[2] += this.learningRate * this.bias[2];
+      this.bias[3] += this.learningRate * this.bias[3];
+    }
+
+    }
+
+}
+
+
+class LSTM {
+
+constructor(inputSize, hiddenSizes, outputSize, learningRate = 0.01, decayRate = 0.999) {
+
+    this.channels=['numerical','alphabetical','alphanumerical', 'textual',
+    'image','audio','video','move', 'other'];
+
+    //«числовой», «категориальный», «текстовый», «изображение», «аудио», «видео», «другое»
+    //'numerical','categorical','textual','image','audio','video','other'];
+//combine channels -way to combine channels in one input - plan to use it in future
+ //   this.combineChannels=['concatenate','add','multiply','average','max','min','other'];
+
+this.combineChannels=['concatenate','add','multiply','average','max','min','other'];
+
+    //«конкатенация», «сложение», «умножение», «среднее», «максимум», «минимум», «другое»
+
+
+    this.inputSize = inputSize;  //this is associated size of input
+
+    this.hiddenSize = hiddenSizes; //this is associated size of hidden layer
+
+    this.outputSize = outputSize; //this is associated size of output
+
+    this.learningRate = learningRate; //this is associated learning rate
+
+    this.decayRate = decayRate; //this is associated decay rate
+
+    this.layers = []; //this is associated layers
+
+    this.layers.push(new Layer(inputSize, hiddenSizes[0], 'input')); //this is associated input layer
+
+    for (let i = 1; i < hiddenSizes.length; i++) {
+
+        this.layers.push(new Layer(hiddenSizes[i - 1], hiddenSizes[i], 'hidden')); //this is associated hidden layers
+
+    }
+
+    this.layers.push(new Layer(hiddenSizes[hiddenSizes.length - 1], outputSize, 'output')); //this is associated output layer
+
+
+    this.probability = 0.5; //this is associated probability
+
+    this.iteration = 0; //this is associated iteration
+
+    // this.memories = {}; //this is associated frequencies
+
+    // this.memories['numerical']=0; //this is associated numerical frequencies
+
+    // this.memories['alphabetical']=0; //this is associated alphabetical frequencies
+
+    // this.memories['alphanumerical']=0; //this is associated alphanumerical frequencies
+
+    // this.memories['textual']=0; //this is associated textual frequencies
+
+    // this.memories['image']=0; //this is associated image frequencies
+
+    // this.memories['audio']=0; //this is associated audio frequencies
+
+    // this.memories['video']=0; //this is associated video frequencies
+
+    // this.memories['move']=0; //this is associated move frequencies
+
+    // this.memories['other']=0; //this is associated other frequencies
+
+
+
+
+
+    this.predictedOutputs = []; //this is associated predicted outputs
+
+    this.timeIntervals = []; //this is associated time intervals
+    this.periodTimeouts = []; //this is associated period timeouts
+
+    this.eventListeners = {}; //this is associated event listeners
+
+    this.eventListeners['onstart'] = []; //this is associated onstart event listeners
+
+    this.eventListeners['onstop'] = []; //this is associated onstop event listeners
+
+    this.eventListeners['onpause'] = []; //this is associated onpause event listeners
+
+    this.eventListeners['onresume'] = []; //this is associated onresume event listeners
+
+    this.eventListeners['onreset'] = []; //this is associated onreset event listeners
+
+    this.eventListeners['onpredict'] = []; //this is associated onpredict event listeners
+
+    this.eventListeners['onupdate'] = []; //this is associated onupdate event listeners
+
+    this.eventListeners['onerror'] = []; //this is associated onerror event listeners
+
+    this.eventListeners['onwarning'] = []; //this is associated onwarning event listeners
+
+    this.eventListeners['oninfo'] = []; //this is associated oninfo event listeners
+
+    this.eventListeners['onlog'] = []; //this is associated onlog event listeners
+
+    this.eventListeners['ondebug'] = []; //this is associated ondebug event listeners
+
+    this.eventListeners['onmessage'] = []; //this is associated onmessage event listeners
+
+    this.eventListeners['onmessageerror'] = []; //this is associated onmessageerror event listeners
+
+    this.eventListeners['onopen'] = []; //this is associated onopen event listeners
+
+
+    this.events = {}; //this is associated events
+    this.tasks = {}; //this is associated tasks
+    this.plans = {}; //this is associated plans
+    this.threads = {}; //this is associated threads
+    // this.threads['main'] = new Thread(); //this is associated main thread
+    // this.threads['main'].lstm = this; //this is associated main thread lstm
+    // this.threads['main'].id = 'main'; //this is associated main thread id
+this.targetnow="world";
+
+
+
+
+// Initialize weights and biases
+this.weights_ih = this._initWeights(inputSize,this.hiddenSize * 4);
+this.weights_hh = this._initWeights(this.hiddenSize, this.hiddenSize * 4);
+this.weights_ho = this._initWeights(this.hiddenSize, outputSize);
+this.bias_ih = this._initBias(this.hiddenSize * 4);
+this.bias_hh = this._initBias(this.hiddenSize * 4);
+this.bias_ho = this._initBias(outputSize);
+
+// Initialize hidden and cell state
+this.hidden = this._initTensor(this.hiddenSize);
+this.cell = this._initTensor(this.hiddenSize);
+
+}
+
+
+constructRandomTask(seed) {
+let task = {};
+task['id'] = seed;
+task['type'] = 'constructRandomTask';
+task['time'] = new Date().getTime();
+//get random from channels
+task[1] = this.channels[Math.floor(Math.random() * this.channels.length)];
+//get random from combineChannels
+task[2] = this.combineChannels[Math.floor(Math.random() * this.combineChannels.length)];
+//get random from channels
+task[3] = this.channels[Math.floor(Math.random() * this.channels.length)];
+
+//implode task 1-3 
+task['task'] = task[1] + task[2] + task[3];
+
+this.targetnow=task['task'];
+
+return task;
+
+
+}
+
+
+
+
+//lstm learn
+
+// Initialize tensor with zeros
+_initTensor(size) {
+return tf.zeros([1, size]);
+}
+
+// Initialize weights with random values between -1 and 1
+_initWeights(rows, cols) {
+return tf.randomUniform([rows, cols], -1, 1);
+}
+
+// Initialize bias with zeros
+_initBias(size) {
+return tf.zeros([1, size]);
+}
+
+// Sigmoid activation function
+_sigmoid(x) {
+return tf.sigmoid(x);
+}
+
+// Hyperbolic tangent activation function
+_tanh(x) {
+return tf.tanh(x);
+}
+
+// Forward pass through the network
+forward(input) {
+const inputTensor = tf.tensor2d(input, [1, this.inputSize]);
+
+// Input to hidden state
+const input_hidden = inputTensor.matMul(this.weights_ih).add(this.bias_ih);
+const input_hidden_f = input_hidden.slice([0, 0], [1, this.hiddenSize]);
+const input_hidden_i = input_hidden.slice([0, this.hiddenSize], [1, this.hiddenSize]);
+const input_hidden_o = input_hidden.slice([0, this.hiddenSize * 2], [1, this.hiddenSize]);
+const input_hidden_g = input_hidden.slice([0, this.hiddenSize * 3], [1, this.hiddenSize]);
+
+// Hidden to hidden state
+const hidden_hidden = this.hidden.matMul(this.weights_hh).add(this.bias_hh);
+const hidden_hidden_f = hidden_hidden.slice([0, 0], [1, this.hiddenSize]);
+const hidden_hidden_i = hidden_hidden.slice([0, this.hiddenSize], [1, this.hiddenSize]);
+const hidden_hidden_o = hidden_hidden.slice([0, this.hiddenSize * 2], [1, this.hiddenSize]);
+const hidden_hidden_g = hidden_hidden.slice([0, this.hiddenSize * 3], [1, this.hiddenSize]);
+
+// Input gate
+const i = this._sigmoid(input_hidden_i.add(hidden_hidden_i));
+
+// Forget gate
+const f = this._sigmoid(input_hidden_f.add(hidden_hidden_f));
+
+// Output gate
+const o = this._sigmoid(input_hidden_o.add(hidden_hidden_o));
+
+// Cell state
+const g = this._tanh(input_hidden_g.add(hidden_hidden_g));
+const cell = f.mul(this.cell).add(i.mul(g));
+
+// Hidden state
+const hidden = o.mul(this._tanh(cell));
+
+// Hidden to output state
+const output = hidden.matMul(this.weights_ho).add(this.bias_ho);
+const outputArray = output.arraySync()[0];
+
+// Update hidden and cell state for next iteration
+this.hidden = hidden;
+this.cell = cell;
+
+return outputArray;
+}
+
+// Backpropagation  
+backpropagate(input, target) {
+
+    // Forward pass
+    const output = this.forward(input);
+
+    // Calculate error
+    const outputTensor = tf.tensor2d(output, [1, this.outputSize]);
+    const targetTensor = tf.tensor2d(target, [1, this.outputSize]);
+    const error = targetTensor.sub(outputTensor);
+
+    // Calculate gradients
+    const gradients = tf.grads((input, hidden, cell) => {
+        const inputTensor = tf.tensor2d(input, [1, this.inputSize]);
+        const hiddenTensor = tf.tensor2d(hidden, [1, this.hiddenSize]);
+        const cellTensor = tf.tensor2d(cell, [1, this.hiddenSize]);
+
+        // Input to hidden state
+        const input_hidden = inputTensor.matMul(this.weights_ih).add(this.bias_ih);
+        const input_hidden_f = input_hidden.slice([0, 0], [1, this.hiddenSize]);
+        const input_hidden_i = input_hidden.slice([0, this.hiddenSize], [1, this.hiddenSize]);
+        const input_hidden_o = input_hidden.slice([0, this.hiddenSize * 2], [1, this.hiddenSize]);
+        const input_hidden_g = input_hidden.slice([0, this.hiddenSize * 3], [1, this.hiddenSize]);
+
+        // Hidden to hidden state
+        const hidden_hidden = hiddenTensor.matMul(this.weights_hh).add(this.bias_hh);
+        const hidden_hidden_f = hidden_hidden.slice([0, 0], [1, this.hiddenSize]);
+        const hidden_hidden_i = hidden_hidden.slice([0, this.hiddenSize], [1, this.hiddenSize]);
+        const hidden_hidden_o = hidden_hidden.slice([0, this.hiddenSize * 2], [1, this.hiddenSize]);
+        const hidden_hidden_g = hidden_hidden.slice([0, this.hiddenSize * 3], [1, this.hiddenSize]);
+
+        // Input gate
+        const i = this._sigmoid(input_hidden_i.add(hidden_hidden_i));
+
+        // Forget gate
+        const f = this._sigmoid(input_hidden_f.add(hidden_hidden_f));
+
+        // Output gate
+        const o = this._sigmoid(input_hidden_o.add(hidden_hidden_o));
+
+        // Cell state
+        const g = this._tanh(input_hidden_g.add(hidden_hidden_g));
+        let tempcell = f.mul(cellTensor).add(i.mul(g));
+
+        // Hidden state
+        let  temphidden = o.mul(this._tanh(tempcell));
+
+        // Hidden to output state
+        const output = temphidden.matMul(this.weights_ho).add(this.bias_ho);
+        const outputArray = output.arraySync()[0];
+
+        return output;
+    });
+
+    const [dWeights_ih, dBias_ih, dWeights_hh, dBias_hh, dWeights_ho, dBias_ho] = gradients([input, this.hidden.arraySync()[0], this.cell.arraySync()[0]]);
+
+    // Update weights and biases
+    this.weights_ih = this.weights_ih.add(dWeights_ih.mul(this.learningRate));
+    this.bias_ih = this.bias_ih.add(dBias_ih.mul(this.learningRate));
+    this.weights_hh = this.weights_hh.add(dWeights_hh.mul(this.learningRate));
+    this.bias_hh = this.bias_hh.add(dBias_hh.mul(this.learningRate));
+    this.weights_ho = this.weights_ho.add(dWeights_ho.mul(this.learningRate));
+    this.bias_ho = this.bias_ho.add(dBias_ho.mul(this.learningRate));
+
+    return error;
+
+} 
+
+
+train (input, target) {
+// Forward pass
+const output = this.forward(input);
+
+// Calculate error
+const outputTensor = tf.tensor2d(output, [1, this.outputSize]);
+const targetTensor = tf.tensor2d(target, [1, this.outputSize]);
+const error = targetTensor.sub(outputTensor);
+
+// Calculate gradients
+const gradients = tf.grads((input, hidden, cell) => {
+const inputTensor = tf.tensor2d(input, [1, this.inputSize]);
+const hiddenTensor = tf.tensor2d(hidden, [1, this.hiddenSize]);
+const cellTensor = tf.tensor2d(cell, [1, this.hiddenSize]);
+
+// Input to hidden state
+const input_hidden = inputTensor.matMul(this.weights_ih).add(this.bias_ih);
+const input_hidden_f = input_hidden.slice([0, 0], [1, this.hiddenSize]);
+const input_hidden_i = input_hidden.slice([0, this.hiddenSize], [1, this.hiddenSize]);
+const input_hidden_o = input_hidden.slice([0, this.hiddenSize * 2], [1, this.hiddenSize]);
+const input_hidden_g = input_hidden.slice([0, this.hiddenSize * 3], [1, this.hiddenSize]);
+
+// Hidden to hidden state
+const hidden_hidden = hiddenTensor.matMul(this.weights_hh).add(this.bias_hh);
+const hidden_hidden_f = hidden_hidden.slice([0, 0], [1, this.hiddenSize]);
+const hidden_hidden_i = hidden_hidden.slice([0, this.hiddenSize], [1, this.hiddenSize]);
+const hidden_hidden_o = hidden_hidden.slice([0, this.hiddenSize * 2], [1, this.hiddenSize]);
+const hidden_hidden_g = hidden_hidden.slice([0, this.hiddenSize * 3], [1, this.hiddenSize]);
+
+// Input gate
+const i = this._sigmoid(input_hidden_i.add(hidden_hidden_i));
+
+// Forget gate
+const f = this._sigmoid(input_hidden_f.add(hidden_hidden_f));
+
+// Output gate
+const o = this._sigmoid(input_hidden_o.add(hidden_hidden_o));
+
+// Cell state
+const g = this._tanh(input_hidden_g.add(hidden_hidden_g));
+let tempcell = f.mul(cellTensor).add(i.mul(g));
+
+// Hidden state
+let  temphidden = o.mul(this._tanh(tempcell));
+
+// Hidden to output state
+const output = temphidden.matMul(this.weights_ho).add(this.bias_ho);
+const outputArray = output.arraySync()[0];
+
+return output;
+});
+
+const [dWeights_ih, dBias_ih, dWeights_hh, dBias_hh, dWeights_ho, dBias_ho] = gradients([input, this.hidden.arraySync()[0], this.cell.arraySync()[0]]);
+
+// Update weights and biases
+this.weights_ih = this.weights_ih.add(dWeights_ih.mul(this.learningRate));
+this.bias_ih = this.bias_ih.add(dBias_ih.mul(this.learningRate));
+this.weights_hh = this.weights_hh.add(dWeights_hh.mul(this.learningRate));
+this.bias_hh = this.bias_hh.add(dBias_hh.mul(this.learningRate));
+this.weights_ho = this.weights_ho.add(dWeights_ho.mul(this.learningRate));
+this.bias_ho = this.bias_ho.add(dBias_ho.mul(this.learningRate));
+
+return error;
+
+} 
+
+
+predictNgrams (input, n) {
+let output = this.forward(input);
+let prediction = output.indexOf(Math.max(...output));
+
+let result = [prediction];
+
+for (let i = 0; i < n; i++) {
+const inputTensor = tf.tensor2d([prediction], [1, 1]);
+const hiddenTensor = tf.tensor2d(this.hidden.arraySync()[0], [1, this.hiddenSize]);
+const cellTensor = tf.tensor2d(this.cell.arraySync()[0], [1, this.hiddenSize]);
+
+// Input to hidden state
+const input_hidden = inputTensor.matMul(this.weights_ih).add(this.bias_ih);
+const input_hidden_f = input_hidden.slice([0, 0], [1, this.hiddenSize]);
+const input_hidden_i = input_hidden.slice([0, this.hiddenSize], [1, this.hiddenSize]);
+const input_hidden_o = input_hidden.slice([0, this.hiddenSize * 2], [1, this.hiddenSize]);
+const input_hidden_g = input_hidden.slice([0, this.hiddenSize * 3], [1, this.hiddenSize]);
+
+// Hidden to hidden state
+const hidden_hidden = hiddenTensor.matMul(this.weights_hh).add(this.bias_hh);
+const hidden_hidden_f = hidden_hidden.slice([0, 0], [1, this.hiddenSize]);
+const hidden_hidden_i = hidden_hidden.slice([0, this.hiddenSize], [1, this.hiddenSize]);
+const hidden_hidden_o = hidden_hidden.slice([0, this.hiddenSize * 2], [1, this.hiddenSize]);
+const hidden_hidden_g = hidden_hidden.slice([0, this.hiddenSize * 3], [1, this.hiddenSize]);
+
+// Input gate
+const i = this._sigmoid(input_hidden_i.add(hidden_hidden_i));
+
+// Forget gate
+const f = this._sigmoid(input_hidden_f.add(hidden_hidden_f));
+
+// Output gate
+const o = this._sigmoid(input_hidden_o.add(hidden_hidden_o));
+
+// Cell state
+const g = this._tanh(input_hidden_g.add(hidden_hidden_g));
+let tempcell = f.mul(cellTensor).add(i.mul(g));
+
+// Hidden state
+let  temphidden = o.mul(this._tanh(tempcell));
+
+// Hidden to output state
+const output = temphidden.matMul(this.weights_ho).add(this.bias_ho);
+const outputArray = output.arraySync()[0];
+
+prediction = outputArray.indexOf(Math.max(...outputArray));
+result.push(prediction);
+
+}
+
+return result;
+}
+
+
+}
+
+
+
+
+class GeneticAlgorithm {
+constructor() {
+this.mutationRate = 0.1;
+this.mutationAmount = 0.2;
+}
+
+evolution (populationSize, mutationRate, target) {
+// Generate initial population of chromosomes
+let population = generatePopulation(populationSize, target.length);
+
+// Evaluate fitness of each chromosome
+let fitness = calculateFitness(population, target);
+
+// Keep track of number of generations and best chromosome
+let generation = 0;
+let bestChromosome = population[0];
+
+// Main loop
+while (bestChromosome.fitness !== target.length) {
+// Select parents for next generation
+let parents = selectParents(population, fitness);
+
+// Create offspring through crossover and mutation
+let offspring = breedOffspring(parents, mutationRate);
+
+// Evaluate fitness of new offspring
+let offspringFitness = calculateFitness(offspring, target);
+
+// Replace population with new generation of offspring
+population = offspring;
+fitness = offspringFitness;
+
+// Update generation count and best chromosome
+generation++;
+bestChromosome = getBestChromosome(population, fitness);
+
+// Visualize search space with a graph
+let graph = createGraph(population);
+drawGraph(graph, bestChromosome);
+}
+
+// Return the best chromosome and number of generations
+return { bestChromosome, generation };
+}
+
+// Define helper functions
+
+generatePopulation(size, chromosomeLength) {
+let population = [];
+
+for (let i = 0; i < size; i++) {
+let chromosome = "";
+for (let j = 0; j < chromosomeLength; j++) {
+  chromosome += getRandomGene();
+}
+population.push(chromosome);
+}
+
+return population;
+}
+
+getRandomGene() {
+let genes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ ";
+return genes.charAt(Math.floor(Math.random() * genes.length));
+}
+
+calculateFitness(population, target) {
+let fitness = [];
+
+for (let i = 0; i < population.length; i++) {
+let score = 0;
+for (let j = 0; j < target.length; j++) {
+  if (population[i][j] === target[j]) {
+    score++;
+  }
+}
+fitness.push({ chromosome: population[i], fitness: score });
+}
+
+return fitness;
+}
+
+selectParents(population, fitness) {
+let parents = [];
+
+for (let i = 0; i < population.length; i++) {
+let parent1 = rouletteWheelSelection(population, fitness);
+let parent2 = rouletteWheelSelection(population, fitness);
+parents.push([parent1, parent2]);
+}
+
+return parents;
+}
+
+rouletteWheelSelection(population, fitness) {
+let sumFitness = fitness.reduce((acc, curr) => acc + curr.fitness, 0);
+let randomValue = Math.random() * sumFitness;
+let partialSum = 0;
+
+for (let i = 0; i < population.length; i++) {
+partialSum += fitness[i].fitness;
+if (partialSum > randomValue) {
+  return population[i];
+}
+}
+}
+
+
+breedOffspring(parents, mutationRate) {
+let offspring = [];
+
+for (let i = 0; i < parents.length; i++) {
+let parent1 = parents[i][0];
+let parent2 = parents[i][1];
+let crossoverPoint = Math.floor(Math.random() * parent1.length);
+let child = parent1.substring(0, crossoverPoint) + parent2.substring(crossoverPoint);
+child = mutate(child, mutationRate);
+offspring.push(child);
+}
+
+return offspring;
+}
+
+// Define the fitness function
+fitness(graph) {
+// Define the fitness score as the sum of all node values
+let sum = 0;
+graph.nodes.forEach(node => sum += node.value);
+return sum;
+}
+
+geneticAlgorithm(populationSize, generations, mutationRate, crossoverRate, numNodes) {
+// Initialize the population
+let population = [];
+for (let i = 0; i < populationSize; i++) {
+let graph = generateRandomGraph(numNodes);
+let fitnessScore = fitness(graph);
+population.push({graph: graph, fitnessScore: fitnessScore});
+}
+
+// Loop through each generation
+for (let generation = 0; generation < generations; generation++) {
+// Sort the population by fitness score
+population.sort((a, b) => b.fitnessScore - a.fitnessScore);
+
+// Select the top 50% of the population as parents for breeding
+let parents = population.slice(0, populationSize/2);
+
+// Breed the parents to create a new population
+let newPopulation = [];
+for (let i = 0; i < populationSize; i++) {
+  // Randomly select two parents
+  let parent1 = parents[Math.floor(Math.random() * parents.length)];
+  let parent2 = parents[Math.floor(Math.random() * parents.length)];
+
+  // Crossover the parents
+  let childGraph = crossover(parent1.graph, parent2.graph, crossoverRate);
+
+  // Mutate the child graph
+  childGraph = mutate(childGraph, mutationRate);
+
+  // Calculate the fitness score of the child graph
+  let childFitnessScore = fitness(childGraph);
+
+  // Add the child to the new population
+  newPopulation.push({graph: childGraph, fitnessScore: childFitnessScore});
+}
+
+// Replace the old population with the new population
+population = newPopulation;
+}
+
+// Sort the final population by fitness score and return the best graph
+population.sort((a, b) => b.fitnessScore - a.fitnessScore);
+return population[0].graph;
+}
+
+// Define the graph generation function
+generateRandomGraph(numNodes) {
+let graph = {nodes: [], edges: []};
+
+// Generate nodes
+for (let i = 0; i < numNodes; i++) {
+graph.nodes.push({id: i, value: Math.floor(Math.random() * 10)});
+}
+
+// Generate edges
+for (let i = 0; i < numNodes; i++) {
+for (let j = i+1; j < numNodes; j++) {
+  if (Math.random() < 0.5) {
+    graph.edges.push({source: i, target: j});
+  }
+}
+}
+
+return graph;
+}
+
+// Define the crossover function
+crossover(graph1, graph2, crossoverRate) {
+let child = {nodes: [], edges: []};
+
+// Copy the nodes from one parent
+if (Math.random() < 0.5) {
+graph1.nodes.forEach(node => child.nodes.push({...node}));
+} else {
+graph2.nodes.forEach(node => child.nodes.push({...node}));
+}
+
+// Copy the edges from both parents based on the crossover rate
+graph1.edges.forEach(edge => {
+if (Math.random() < crossoverRate) {
+  child.edges.push({...edge});
+}
+});
+graph2.edges.forEach(edge => {
+if (Math.random() < crossoverRate) {
+  child.edges.push({...edge});
+}
+});
+
+
+return child;
+}
+
+// Define the mutation function
+
+mutate(graph, mutationRate) {
+// Mutate the nodes
+graph.nodes.forEach(node => {
+if (Math.random() < mutationRate) {
+  node.value = Math.floor(Math.random() * 10);
+}
+});
+
+// Mutate the edges
+graph.edges.forEach(edge => {
+if (Math.random() < mutationRate) {
+  if (Math.random() < 0.5) {
+    edge.source = Math.floor(Math.random() * graph.nodes.length);
+  } else {
+    edge.target = Math.floor(Math.random() * graph.nodes.length);
+  }
+}
+});
+
+return graph;
+}
+optimize(pattern) {
+
+const graph = this.generatePattern(requirements);
+const nodes = Object.keys(graph);
+  const edges = [];
+  for (const node in graph) {
+    for (const neighbor in graph[node]) {
+      edges.push([node, neighbor, graph[node][neighbor]]);
+    }
+  }
+  return { nodes, edges };
+}
+
+generatePattern(requirements) {
+const pattern = new Pattern(requirements);
+return pattern;
+}
+
+
+
+
+}
+
+
+class Pattern {
+constructor(requirements) {
+this.requirements = requirements;
+//this.pattern = this.generatePattern();
+}
+
+generatePattern() {
+const pattern = [];
+
+for (let i = 0; i < this.requirements.length; i++) {
+const requirement = this.requirements[i];
+const patternItem = this.generatePatternItem(requirement);
+pattern.push(patternItem);
+}
+
+return pattern;
+}
+
+generatePatternItem(requirement) {
+//implode const requerement to string
+const requirementString = requirement.join('');
+
+//convert requirement string to color
+const color = this.convertStringToColor(requirementString);
+
+return color;
+}
+
+convertStringToColor(string) {
+let hash = 0;
+for (let i = 0; i < string.length; i++) {
+hash = string.charCodeAt(i) + ((hash << 5) - hash);
+}
+
+let color = '#';
+
+for (let i = 0; i < 3; i++) {
+const value = (hash >> (i * 8)) & 0xFF;
+color += ('00' + value.toString(16)).substr(-2);
+}
+
+return color;
+}
+}
+
+
+
+function generateSystem(base) {
+  const system = [];
+  for (let i = 0; i < base; i++) {
+    system.push(i.toString());
+  }
+  return system;
+}
+
+
+
+function generateSystemUTF(utf8Base) {
+    const system = [];
+    for (let i = 0; i < utf8Base; i++) {
+        system.push(i.toString(2).padStart(8, "0"));
+    }
+    return system;
+}
+var toUtf8 = function(text) {
+  	var surrogate = encodeURIComponent(text);
+  	var result = '';
+    for (var i = 0; i < surrogate.length;) {
+        var character = surrogate[i];
+		i += 1;
+        if (character == '%') {
+        	var hex = surrogate.substring(i, i += 2);
+			if (hex) {
+				result += String.fromCharCode(parseInt(hex, 16));
+			}
+        } else {
+        	result += character;
+        }
+    }
+    return result;
+};
+
+
+
+
+
+
+function createOneHotEncoding(str, charVocab) {
+  const encoding = [];
+
+  for (const char of str) {
+    const vector = new Array(charVocab.length).fill(0);
+    const charIndex = charVocab.indexOf(char);
+    vector[charIndex] = 1;
+    encoding.push(vector);
+  }
+
+  return encoding;
+}
+
+
+function getUTF8Base(string) {
+  let maxCharCode = 0;
+  for (let i = 0; i < string.length; i++) {
+    const charCode = string.charCodeAt(i);
+    if (charCode > maxCharCode) {
+      maxCharCode = charCode;
+    }
+  }
+  return maxCharCode;
+}
+
+
+
+function markovChainsMapping(graph, system, delimiter, n = 2) {
+  const mapping = {};
+  for (const vertex in graph) {
+    mapping[vertex] = [];
+    for (let i = 0; i < system.length; i++) {
+      const newNum = parseInt(vertex, system.length) * system.length + i;
+      const newVertex = newNum.toString(system.length);
+      if (graph[newVertex]) {
+        mapping[vertex].push(graph[newVertex].lstmInput);
+      } else {
+        mapping[vertex].push(null);
+      }
+    }
+  }
+  return mapping;
+}
+
+
+
+function convertGraphToShortestPathFormat(graph) {
+  const nodes = Object.keys(graph);
+  const edges = [];
+  for (const node in graph) {
+    for (const neighbor in graph[node]) {
+      edges.push([node, neighbor, graph[node][neighbor]]);
+    }
+  }
+  return { nodes, edges };
+}
+
+
+
+function probabilityConstuctFromArray(array) {
+  const probability = {};
+  for (const item of array) {
+    if (probability[item]) {
+      probability[item] += 1;
+    } else {
+      probability[item] = 1;
+    }
+  }
+  for (const item in probability) {
+    probability[item] /= array.length;
+  }
+  return probability;
+
+}
+
+//associativity is the probability of the next character in the sequence and similarity is the similarity of the previous sequence and the next sequence
+
+function probabilityConstructFromGraph(graph) {
+  const probability = {};
+  for (const vertex in graph) {
+    for (const neighbor in graph[vertex]) {
+      if (probability[neighbor]) {
+        probability[neighbor] += graph[vertex][neighbor];
+      } else {
+        probability[neighbor] = graph[vertex][neighbor];
+      }
+    }
+  }
+  return probability;
+}
+
+function similarityOfStrings(string1, string2) {
+  let similarity = 0;
+  for (let i = 0; i < string1.length; i++) {
+    if (string1[i] === string2[i]) {
+      similarity += 1;
+    }
+  }
+  return similarity / string1.length;
+}
+
+function associativityOfStringAndGraph(string, graph) {
+  const probability = probabilityConstructFromGraph(graph);
+  let associativity = 0;
+  for (const vertex in graph) {
+    if (vertex[0] === string) {
+      associativity += probability[vertex];
+    }
+  }
+  return associativity;
+}
+
+
+
+//harmonic function
+const harmonicFunction = (array) => {
+const sum = array.reduce((a, b) => a + b, 0);
+const harmonic = array.length / sum;
+return harmonic;
+
+
+}
+
+
+
+function fractalScale(str1, str2) {
+  const maxLength = Math.max(str1.length, str2.length);
+  const minLength = Math.min(str1.length, str2.length);
+  const scale = maxLength / minLength;
+
+  let scaledStr1 = '';
+  let scaledStr2 = '';
+
+  for (let i = 0; i < minLength; i++) {
+    scaledStr1 += str1[i];
+    scaledStr2 += str2[i];
+    for (let j = 0; j < scale - 1; j++) {
+      const index = Math.floor((j * (str1.length - 1)) / (scale - 1));
+      scaledStr1 += str1[index];
+      scaledStr2 += str2[index];
+    }
+  }
+
+  return [scaledStr1, scaledStr2];
+}
+
+function findUniqueNgramInString(string, n) {
+  const ngrams = [];
+  for (let i = 0; i < string.length - n + 1; i++) {
+    const ngram = string.slice(i, i + n);
+    if (!ngrams.includes(ngram)) {
+      ngrams.push(ngram);
+    }
+  }
+  return ngrams;
+}
+
+
+//split 10 words into 3 letters
+
+function splitWord(word) {
+    var letters = [];
+    var letter = "";
+    for (var i = 0; i < word.length; i++) {
+        letter += word[i];
+        if (letter.length == 3) {
+            letters.push(letter);
+            letter = "";
+        }
+    }
+    if (letter.length > 0) {
+        letters.push(letter);
+    }
+    return letters;
+}
+
+
+
+// Example usage
+const start = [1, 2, 3];
+const end = [7, 8, 9];
+const levels = 3;
+const result0 = fractalScale(start, end, levels);
+console.log(result0);
+// Output: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 4, 5, 6, 4.5, 5.5, 6.5, 6.5, 7.5, 8.5 ]
+
+var geneticAlgorithmValue = new GeneticAlgorithm();
+
+
+var arrayLSTM = [1, 2, 3, 7, 8, 9];
+var memories = new Memories();
+
+
+
+console.log(getUTF8Base("a"));
+
+console.log(generateSystemUTF(8));
+
+console.log("convert strings");
+
+
+
+//console.log(result);
+//convert object to string
+ //   let result0=JSON.stringify(result);
+   // let target= findUniqueNgramInString(JSON.stringify(result));
+  //  console.log(target);
+    
+   // console.log(generateSystem(16));
+    let systemTriplets = generateSystem(16);
+console.log(systemTriplets);
+
+    var patternMaster = new PatternMaster(requirements, arrayLSTM, geneticAlgorithmValue, memories,  "\t", 3);
+let association= patternMaster.generateInitialPatterns(memories.loadMemories(), "\t", 3);
+
+association.then(function(result) {
+    console.log(result);
+    let systemDynamic = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"];
+
+    var graph = createGraph(result, "\t", 3);
+
+    var graphShortestPathFormat = convertGraphToShortestPathFormat(graph);
+
+    var utf = toUtf8(graphShortestPathFormat);
+
+
+
+console.log(utf);
+
+
+
+  //graph is the graph of the training data
+  console.log("this is graph")
+console.log(graph);
+
+console.log("shortest graph");
+console.log(graphShortestPathFormat);
+
+
+
+
+
+//automatically generate mapping for system of any length
+let mappingDynamic = markovChainsMapping(graph, systemTriplets, "\t", 3); // maybe ' ' or '\t' or '\n' or '\r' or '\f' or '\v' or '\0'
+
+console.log("markov chains mapping");
+console.log(mappingDynamic);
+
+addEdges(graph, systemTriplets, mappingDynamic, 3);
+
+//look edges of graph
+console.log("this is graph edges");
+
+console.log(graph);
+
+
+
+
+function countGraphLength(graph) {
+  let count = 0;
+  for (const vertex in graph) {
+    count += 1;
+  }
+  return count;
+}
+
+let mappingDynLength = countGraphLength(mappingDynamic);
+
+console.log(mappingDynamic);
+
+
+
+
+
+
+});
+
+
+
+
+
+
+function dijkstra(graph, source, target) {
+  const distances = {};
+  const visited = {};
+  const predecessors = {};
+  const heap = new PriorityQueue();
+
+  for (const vertex in graph) {
+    distances[vertex] = Infinity;
+    visited[vertex] = false;
+  }
+  distances[source] = 0;
+
+  heap.enqueue([source, 0]);
+
+  while (!heap.isEmpty()) {
+    const [current, distance] = heap.dequeue();
+
+    if (current === target) {
+      const path = [];
+      let predecessor = target;
+      while (predecessor !== source) {
+        path.push(predecessor);
+        predecessor = predecessors[predecessor];
+      }
+      path.push(source);
+      path.reverse();
+      return [path, distances[target]];
+    }
+
+    visited[current] = true;
+
+    for (const neighbor in graph[current]) {
+      const newDistance = distance + graph[current][neighbor];
+      if (!visited[neighbor] && newDistance < distances[neighbor]) {
+        distances[neighbor] = newDistance;
+        predecessors[neighbor] = current;
+        heap.enqueue([neighbor, newDistance]);
+      }
+    }
+    }
+    return [null, Infinity];
+    }
+
+    const shuffleArray = (array) => {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+};
+
+function getCPUspeed () {
+
+    var _speedconstant = 8.9997e-9; //if speed=(c*a)/t, then constant=(s*t)/a and time=(a*c)/s
+var d = new Date();
+var amount = 150000000;
+var estprocessor = 1.7; //average processor speed, in GHZ
+console.log("JSBenchmark by Aaron Becker, running loop "+amount+" times.     Estimated time (for "+estprocessor+"ghz processor) is "+(Math.round(((_speedconstant*amount)/estprocessor)*100)/100)+"s");
+for (var i = amount; i>0; i--) {} 
+var newd = new Date();
+var accnewd = Number(String(newd.getSeconds())+"."+String(newd.getMilliseconds()));
+var accd = Number(String(d.getSeconds())+"."+String(d.getMilliseconds())); 
+var di = accnewd-accd;
+//console.log(accnewd,accd,di);
+if (d.getMinutes() != newd.getMinutes()) {
+di = (60*(newd.getMinutes()-d.getMinutes()))+di}
+spd = ((_speedconstant*amount)/di);
+console.log("Time: "+Math.round(di*1000)/1000+"s, estimated speed: "+Math.round(spd*1000)/1000+"GHZ");
+
+return spd;
+}
+
+console.log("robot speed:")
+console.log(getCPUspeed());
+
+console.log(window.performance);
+
+console.log(window.performance.memory);
+
+
+
+function castToSameLength(arr1, arr2, padChar = ' ') {
+  const len1 = arr1.length;
+  const len2 = arr2.length;
+  if (len1 < len2) {
+    arr1 = arr1.concat(Array(len2 - len1).fill(padChar));
+  } else if (len2 < len1) {
+    arr2 = arr2.concat(Array(len1 - len2).fill(padChar));
+  }
+  return [arr1, arr2];
+}
+
+// Usage:
+const [arr1, arr2] = castToSameLength([1, 2, 3], [4, 5], 0);
+console.log(arr1); // Output: [1, 2, 3, 0, 0]
+console.log(arr2); // Output: [4, 5, 0, 0, 0]
+
+const [str1, str2] = castToSameLength('hello', 'world', '-');
+console.log(str1); // Output: 'hello-'
+console.log(str2); // Output: 'world'
+
+
+function fractalScale(startArray, endArray, levels) {
+  // Make sure both arrays are the same length
+  if (startArray.length !== endArray.length) {
+    throw new Error('Arrays must be the same length.');
+  }
+
+  // Create a new array to hold the results
+  const resultArray = [];
+
+  // Recursively calculate the values for each level
+  function recurse(start, end, level) {
+    if (level === 0) {
+      resultArray.push(start);
+    } else {
+      const mid = start.map((value, index) => (value + end[index]) / 2);
+      recurse(start, mid, level - 1);
+      recurse(mid, end, level - 1);
+    }
+  }
+
+  // Start the recursion
+  recurse(startArray, endArray, levels);
+
+  return resultArray;
+}
+
+
+
+//optimization 
+
+// // Создаем новый экземпляр PatternMaster
+// const patternMaster2 = new PatternMaster();
+
+// // Определяем требования и ограничения для нового паттерна
+// const requirements2 = {
+//   name: "MyPattern",
+//   language: "JavaScript",
+//   type: "Structural",
+//   complexity: "Medium",
+//   scalability: "High",
+//   extensibility: "High"
+// };
+
+// // Генерируем первые версии паттерна на основе требований
+// const initialVersions = patternMaster.generateInitialVersions(requirements2);
+
+// // Пользователь выбирает одну из сгенерированных версий и оптимизирует ее
+// let selectedVersion = initialVersions[0];
+// let optimizedVersion;
+
+// while (!optimizedVersion) {
+//   optimizedVersion = patternMaster.optimize(selectedVersion);
+//   selectedVersion = patternMaster.getNextVersion(selectedVersion);
+// }
+
+// // Получаем окончательный паттерн
+// const finalPattern2 = optimizedVersion.pattern;
+
+// console.log(finalPattern2);
+
+
+    </script>
+
+</html>
